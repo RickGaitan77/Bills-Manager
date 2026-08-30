@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Bills" />
+  <title>Bills Manager</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- React 18 & Babel for browser-side JSX execution -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Canvas Confetti & Lucide Icons -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    input, select, textarea {
+      user-select: text;
+    }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    .card-overdue-glow {
+      box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.35), 0 8px 32px -4px rgba(239, 68, 68, 0.2);
+    }
+    .card-due-soon-glow {
+      box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.35), 0 8px 32px -4px rgba(245, 158, 11, 0.2);
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 antialiased selection:bg-amber-500/30 selection:text-amber-200">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useCallback, useRef } = React;
+
+    // --- ICON COMPONENT (Lucide SVG Proxy) ---
+    const Icon = ({ name, className = "w-4 h-4", ...props }) => {
+      const ref = useRef(null);
+      useEffect(() => {
+        if (ref.current && window.lucide) {
+          ref.current.innerHTML = '';
+          const iconElement = document.createElement('i');
+          iconElement.setAttribute('data-lucide', name);
+          if (className) iconElement.className = className;
+          ref.current.appendChild(iconElement);
+          window.lucide.createIcons({ root: ref.current });
+        }
+      }, [name, className]);
+      return <span ref={ref} className="inline-flex items-center justify-center shrink-0" {...props} />;
+    };
+
+    // --- CATEGORIES DEFINITION ---
+    const CATEGORIES = {
+      utilities: { id: 'utilities', label: 'Utilities & Power', icon: 'zap', color: '#eab308', bgDark: 'bg-amber-500/15', textDark: 'text-amber-400', bgLight: 'bg-amber-50', textLight: 'text-amber-700' },
+      housing: { id: 'housing', label: 'Housing / Rent', icon: 'home', color: '#3b82f6', bgDark: 'bg-blue-500/15', textDark: 'text-blue-400', bgLight: 'bg-blue-50', textLight: 'text-blue-700' },
+      subscriptions: { id: 'subscriptions', label: 'Subscriptions', icon: 'film', color: '#a855f7', bgDark: 'bg-purple-500/15', textDark: 'text-purple-400', bgLight: 'bg-purple-50', textLight: 'text-purple-700' },
+      telecom: { id: 'telecom', label: 'Internet & Phone', icon: 'wifi', color: '#06b6d4', bgDark: 'bg-cyan-500/15', textDark: 'text-cyan-400', bgLight: 'bg-cyan-50', textLight: 'text-cyan-700' },
+      credit_loan: { id: 'credit_loan', label: 'Credit & Loans', icon: 'credit-card', color: '#f43f5e', bgDark: 'bg-rose-500/15', textDark: 'text-rose-400', bgLight: 'bg-rose-50', textLight: 'text-rose-700' },
+      insurance: { id: 'insurance', label: 'Insurance', icon: 'shield-check', color: '#10b981', bgDark: 'bg-emerald-500/15', textDark: 'text-emerald-400', bgLight: 'bg-emerald-50', textLight: 'text-emerald-700' },
+      health: { id: 'health', label: 'Medical & Health', icon: 'heart-pulse', color: '#ec4899', bgDark: 'bg-pink-500/15', textDark: 'text-pink-400', bgLight: 'bg-pink-50', textLight: 'text-pink-700' },
+      transport: { id: 'transport', label: 'Transport & Auto', icon: 'car', color: '#f97316', bgDark: 'bg-orange-500/15', textDark: 'text-orange-400', bgLight: 'bg-orange-50', textLight: 'text-orange-700' },
+      other: { id: 'other', label: 'Other & General', icon: 'receipt', color: '#94a3b8', bgDark: 'bg-zinc-800', textDark: 'text-zinc-300', bgLight: 'bg-zinc-100', textLight: 'text-zinc-700' },
+    };
+
+    const inferCategoryFromName = (name) => {
+      const lower = name.toLowerCase();
+      if (lower.match(/electric|power|water|gas|utility|trash|sewer|energy/)) return 'utilities';
+      if (lower.match(/rent|mortgage|lease|hoa|condo/)) return 'housing';
+      if (lower.match(/netflix|spotify|apple|youtube|prime|disney|hulu|sub|gym|chatgpt|cloud/)) return 'subscriptions';
+      if (lower.match(/internet|wifi|phone|verizon|at&t|t-mobile|comcast|spectrum/)) return 'telecom';
+      if (lower.match(/credit|card|loan|chase|citi|amex|capital one|discover|student|bank/)) return 'credit_loan';
+      if (lower.match(/insurance|geico|progressive|state farm|allstate/)) return 'insurance';
+      if (lower.match(/health|doctor|dental|medical|vision|pharmacy|hospital/)) return 'health';
+      if (lower.match(/car|auto|gasoline|toll|parking|transit/)) return 'transport';
+      return 'other';
+    };
+
+    // --- DATE UTILITIES ---
+    const getNextMonthDate = (dateString) => {
+      if (!dateString) return '';
+      const parts = dateString.split('-').map(Number);
+      if (parts.length !== 3 || parts.some(isNaN)) return '';
+      let [year, month, day] = parts;
+      let nextYear = year;
+      let nextMonth = month + 1;
+      if (nextMonth > 12) {
+        nextMonth = 1;
+        nextYear += 1;
+      }
+      const daysInNextMonth = new Date(nextYear, nextMonth, 0).getDate();
+      const clampedDay = Math.min(day, daysInNextMonth);
+      return `${nextYear}-${String(nextMonth).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`;
+    };
+
+    const getDiffDays = (dueDateStr) => {
+      if (!dueDateStr) return 0;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const [y, m, d] = dueDateStr.split('-').map(Number);
+      const targetDate = new Date(y, m - 1, d);
+      targetDate.setHours(0, 0, 0, 0);
+      return Math.round((targetDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    };
+
+    const formatDisplayDate = (dateStr, includeYear = false) => {
+      if (!dateStr) return '';
+      const [y, m, d] = dateStr.split('-').map(Number);
+      if (!y || !m || !d) return dateStr;
+      return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: includeYear ? 'numeric' : undefined,
+      });
+    };
+
+    const getStatusInfo = (bill) => {
+      if (bill.paid) {
+        return {
+          status: 'paid',
+          badgeLabel: 'Paid',
+          cardBorderClass: 'border-zinc-800 opacity-65',
+          badgeClass: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20',
+        };
+      }
+      const diffDays = getDiffDays(bill.dueDate);
+      if (diffDays < 0) {
+        const overdueDays = Math.abs(diffDays);
+        return {
+          status: 'overdue',
+          badgeLabel: overdueDays === 1 ? '1 day overdue' : `${overdueDays} days overdue`,
+          cardBorderClass: 'border-red-500/60 card-overdue-glow',
+          badgeClass: 'bg-red-500/15 text-red-400 font-semibold border border-red-500/30 animate-pulse',
+        };
+      }
+      if (diffDays === 0) {
+        return {
+          status: 'dueToday',
+          badgeLabel: 'Due Today',
+          cardBorderClass: 'border-amber-500/80 card-due-soon-glow',
+          badgeClass: 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40',
+        };
+      }
+      if (diffDays <= 3) {
+        return {
+          status: 'dueSoon',
+          badgeLabel: `Due in ${diffDays} day${diffDays === 1 ? '' : 's'}`,
+          cardBorderClass: 'border-amber-500/50 card-due-soon-glow',
+          badgeClass: 'bg-amber-500/10 text-amber-400 font-medium border border-amber-500/20',
+        };
+      }
+      return {
+        status: 'safe',
+        badgeLabel: `Due in ${diffDays} days`,
+        cardBorderClass: 'border-emerald-500/30 hover:border-emerald-500/50',
+        badgeClass: 'bg-zinc-800 text-zinc-300 border border-zinc-700/60',
+      };
+    };
+
+    // --- CALENDAR EXPORT LOGIC (.ICS) ---
+    const generateBillICS = (bill) => {
+      const cleanDate = bill.dueDate.replace(/-/g, '');
+      const descriptionLines = [
+        `Amount due: $${bill.amount}`,
+        bill.disconnectDate ? `Disconnect Date: ${bill.disconnectDate}` : '',
+        bill.notes ? `Notes: ${bill.notes}` : '',
+      ].filter(Boolean).join('\\n');
+      return [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//Bills Manager//EN',
+        'CALSCALE:GREGORIAN',
+        'BEGIN:VEVENT',
+        `UID:bill-${bill.name.replace(/\s+/g, '_')}-${cleanDate}@billsmanager`,
+        `SUMMARY:Bill Due: ${bill.name} ($${bill.amount})`,
+        `DESCRIPTION:${descriptionLines}`,
+        `DTSTART;VALUE=DATE:${cleanDate}`,
+        `DTEND;VALUE=DATE:${cleanDate}`,
+        'BEGIN:VALARM',
+        'TRIGGER:-P1D',
+        'ACTION:DISPLAY',
+        `DESCRIPTION:Reminder: ${bill.name} is due tomorrow!`,
+        'END:VALARM',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n');
+    };
+
+    const generateBulkICS = (bills, calendarName = 'My Upcoming Bills') => {
+      const events = bills.map((bill, index) => {
+        const cleanDate = bill.dueDate.replace(/-/g, '');
+        const descriptionLines = [
+          `Amount due: $${bill.amount}`,
+          bill.disconnectDate ? `Disconnect Date: ${bill.disconnectDate}` : '',
+          bill.notes ? `Notes: ${bill.notes}` : '',
+        ].filter(Boolean).join('\\n');
+        return [
+          'BEGIN:VEVENT',
+          `UID:bill-${index}-${bill.name.replace(/\s+/g, '_')}-${cleanDate}@billsmanager`,
+          `SUMMARY:Bill Due: ${bill.name} ($${bill.amount})`,
+          `DESCRIPTION:${descriptionLines}`,
+          `DTSTART;VALUE=DATE:${cleanDate}`,
+          `DTEND;VALUE=DATE:${cleanDate}`,
+          'BEGIN:VALARM',
+          'TRIGGER:-P1D',
+          'ACTION:DISPLAY',
+          `DESCRIPTION:Reminder: ${bill.name} is due tomorrow!`,
+          'END:VALARM',
+          'END:VEVENT',
+        ].join('\r\n');
+      });
+      return [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//Bills Manager//EN',
+        `X-WR-CALNAME:${calendarName}`,
+        'CALSCALE:GREGORIAN',
+        ...events,
+        'END:VCALENDAR',
+      ].join('\r\n');
+    };
+
+    const triggerICSDownload = (icsContent, filename) => {
+      const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+      const link = document.createElement('a');
+      link.href = window.URL.createObjectURL(blob);
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(link.href), 2000);
+    };
+
+    const downloadBillICS = (bill) => {
+      const ics = generateBillICS(bill);
+      const cleanName = bill.name.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_') || 'Bill';
+      triggerICSDownload(ics, `${cleanName}_Due.ics`);
+    };
+
+    const downloadBulkICS = (bills, filename = 'Upcoming_Bills.ics') => {
+      const ics = generateBulkICS(bills);
+      triggerICSDownload(ics, filename);
+    };
+
+    // --- STORAGE HELPERS ---
+    const STORAGE_KEY = 'bills';
+    const getSampleBills = () => {
+      const now = new Date();
+      const d = now.getDate();
+      const makeDate = (dayOffset) => {
+        const target = new Date(now);
+        target.setDate(d + dayOffset);
+        return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}-${String(target.getDate()).padStart(2, '0')}`;
+      };
+      return [
+        { id: 'sample-1', name: 'Electric & Gas Utility', amount: '142.50', dueDate: makeDate(-2), disconnectDate: makeDate(5), isRecurring: true, paid: false, category: 'utilities', notes: 'Account #482910' },
+        { id: 'sample-2', name: 'High-Speed Fiber Internet', amount: '79.99', dueDate: makeDate(1), isRecurring: true, paid: false, category: 'telecom', notes: 'Autopay failed last cycle' },
+        { id: 'sample-3', name: 'Apartment Rent', amount: '1450.00', dueDate: makeDate(8), isRecurring: true, paid: false, category: 'housing', notes: 'Pay via tenant portal' },
+        { id: 'sample-4', name: 'Car & Auto Insurance', amount: '115.00', dueDate: makeDate(14), isRecurring: true, paid: false, category: 'insurance' },
+        { id: 'sample-5', name: 'Streaming Bundle (Netflix & Spotify)', amount: '32.98', dueDate: makeDate(-6), isRecurring: true, paid: true, category: 'subscriptions' },
+      ];
+    };
+
+    const loadBills = () => {
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (!stored) {
+          const samples = getSampleBills();
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(samples));
+          return samples;
+        }
+        return JSON.parse(stored);
+      } catch (err) {
+        return getSampleBills();
+      }
+    };
+
+    // --- MODAL: BILL ADD / EDIT ---
+    const BillModal = ({ isOpen, onClose, onSave, initialBill, isDark }) => {
+      const [name, setName] = useState('');
+      const [amount, setAmount] = useState('');
+      const [dueDate, setDueDate] = useState('');
+      const [disconnectDate, setDisconnectDate] = useState('');
+      const [isRecurring, setIsRecurring] = useState(true);
+      const [category, setCategory] = useState('utilities');
+      const [notes, setNotes] = useState('');
+      const [autoDownloadICS, setAutoDownloadICS] = useState(false);
+      const [userPickedCategory, setUserPickedCategory] = useState(false);
+
+      useEffect(() => {
+        if (isOpen) {
+          if (initialBill) {
+            setName(initialBill.name);
+            setAmount(initialBill.amount);
+            setDueDate(initialBill.dueDate);
+            setDisconnectDate(initialBill.disconnectDate || '');
+            setIsRecurring(initialBill.isRecurring ?? true);
+            setCategory(initialBill.category || inferCategoryFromName(initialBill.name));
+            setNotes(initialBill.notes || '');
+            setUserPickedCategory(true);
+          } else {
+            setName('');
+            setAmount('');
+            setDueDate(new Date().toISOString().split('T')[0]);
+            setDisconnectDate('');
+            setIsRecurring(true);
+            setCategory('utilities');
+            setNotes('');
+            setAutoDownloadICS(false);
+            setUserPickedCategory(false);
+          }
+        }
+      }, [isOpen, initialBill]);
+
+      if (!isOpen) return null;
+
+      const handleNameChange = (val) => {
+        setName(val);
+        if (!userPickedCategory) setCategory(inferCategoryFromName(val));
+      };
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!name.trim() || !amount || !dueDate) return;
+        const parsed = parseFloat(amount);
+        if (isNaN(parsed) || parsed < 0) return;
+        onSave({
+          name: name.trim(),
+          amount: parsed.toFixed(2),
+          dueDate,
+          disconnectDate: disconnectDate.trim() || undefined,
+          isRecurring,
+          paid: initialBill ? initialBill.paid : false,
+          category,
+          notes: notes.trim() || undefined,
+        }, autoDownloadICS);
+      };
+
+      return (
+        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
+          <div className={`w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl border p-5 sm:p-6 space-y-4 max-h-[92vh] overflow-y-auto shadow-2xl backdrop-blur-2xl transition-all ${
+            isDark ? 'bg-slate-900/90 border-white/15 text-slate-100' : 'bg-white/95 border-white/80 text-slate-900 shadow-slate-300/60'
+          }`}>
+            <div className="flex items-center justify-between border-b pb-3 border-white/10">
+              <div>
+                <h2 className="text-lg font-bold text-amber-400">{initialBill ? 'Edit Bill Details' : 'Add New Bill'}</h2>
+                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{initialBill ? 'Update amount, due dates, or recurrence' : 'Schedule a new payment or monthly recurring bill'}</p>
+              </div>
+              <button onClick={onClose} className="p-2 rounded-xl text-slate-400 hover:text-white"><Icon name="x" className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Bill Name *</label>
+                <input type="text" required value={name} onChange={(e) => handleNameChange(e.target.value)} placeholder="e.g., Electric Utility, Rent, Netflix" className={`w-full px-3.5 py-2.5 rounded-xl border text-sm font-medium outline-none ${isDark ? 'bg-white/[0.04] border-white/10 text-white placeholder-slate-500 focus:border-amber-400/60' : 'bg-white/80 border-slate-300 text-slate-900'}`} />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Amount ($) *</label>
+                  <input type="number" step="0.01" min="0" required value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" className={`w-full px-3.5 py-2.5 rounded-xl border text-sm font-bold outline-none ${isDark ? 'bg-white/[0.04] border-white/10 text-white focus:border-amber-400/60' : 'bg-white/80 border-slate-300 text-slate-900'}`} />
+                </div>
+                <div>
+                  <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Due Date *</label>
+                  <input type="date" required value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={`w-full px-3.5 py-2.5 rounded-xl border text-sm font-medium outline-none ${isDark ? 'bg-white/[0.04] border-white/10 text-white [color-scheme:dark]' : 'bg-white/80 border-slate-300 text-slate-900'}`} />
+                </div>
+              </div>
+              <div>
+                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 flex justify-between ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                  <span>Disconnect / Final Notice Date</span>
+                  <span className="text-[10px] font-normal lowercase opacity-60">optional</span>
+                </label>
+                <input type="date" value={disconnectDate} onChange={(e) => setDisconnectDate(e.target.value)} className={`w-full px-3.5 py-2.5 rounded-xl border text-sm font-medium outline-none ${isDark ? 'bg-white/[0.04] border-white/10 text-white [color-scheme:dark]' : 'bg-white/80 border-slate-300 text-slate-900'}`} />
+              </div>
+              <div>
+                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Category</label>
+                <div className="grid grid-cols-3 gap-1.5 max-h-36 overflow-y-auto pr-1">
+                  {Object.values(CATEGORIES).map((cat) => (
+                    <button key={cat.id} type="button" onClick={() => { setCategory(cat.id); setUserPickedCategory(true); }} className={`py-1.5 px-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 border truncate ${category === cat.id ? 'bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 border-amber-300/50 font-bold' : isDark ? 'bg-white/[0.04] border-white/10 text-slate-300' : 'bg-white/80 border-slate-200 text-slate-700'}`}>
+                      <Icon name={cat.icon} className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{cat.label.split(' ')[0]}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className={`block text-xs font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Notes / Account #</label>
+                <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g., Autopay with Amex ending 4012" className={`w-full px-3.5 py-2.5 rounded-xl border text-sm font-medium outline-none ${isDark ? 'bg-white/[0.04] border-white/10 text-white placeholder-slate-500' : 'bg-white/80 border-slate-300 text-slate-900'}`} />
+              </div>
+              <div className={`p-3 rounded-xl border space-y-2.5 ${isDark ? 'bg-white/[0.03] border-white/10' : 'bg-slate-50/80 border-slate-200'}`}>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input type="checkbox" checked={isRecurring} onChange={(e) => setIsRecurring(e.target.checked)} className="w-4 h-4 rounded accent-amber-500" />
+                  <div className="text-xs">
+                    <span className="font-bold flex items-center gap-1.5 text-purple-300"><Icon name="repeat" className="w-3.5 h-3.5" /> Make this a recurring monthly bill</span>
+                    <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>When marked paid, automatically generates next month's payment schedule.</p>
+                  </div>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer pt-1 border-t border-white/10">
+                  <input type="checkbox" checked={autoDownloadICS} onChange={(e) => setAutoDownloadICS(e.target.checked)} className="w-4 h-4 rounded accent-amber-500" />
+                  <span className="text-xs font-semibold">Download .ics calendar event immediately</span>
+                </label>
+              </div>
+              <button type="submit" className="w-full bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold py-3 px-4 rounded-xl text-sm transition-all shadow-lg shadow-amber-500/25 border border-amber-300/40 active:scale-[0.98] flex items-center justify-center gap-2">
+                <Icon name="check" className="w-4 h-4" />
+                <span>{initialBill ? 'Update Bill' : 'Save Bill & Schedule'}</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      );
+    };
+
+    // --- MODAL: CALENDAR BULK EXPORT ---
+    const CalendarExportModal = ({ isOpen, onClose, bills, isDark }) => {
+      const [range, setRange] = useState('upcoming');
+      if (!isOpen) return null;
+      const now = new Date();
+      const exportList = bills.filter((b) => {
+        if (!b.dueDate) return false;
+        if (range === 'upcoming') return !b.paid;
+        if (range === 'thisMonth') {
+          const [y, m] = b.dueDate.split('-').map(Number);
+          return y === now.getFullYear() && m === now.getMonth() + 1;
+        }
+        return true;
+      });
+
+      return (
+        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
+          <div className={`w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border p-5 sm:p-6 space-y-4 ${isDark ? 'bg-slate-900/90 border-white/15 text-slate-100' : 'bg-white/95 text-slate-900'}`}>
+            <div className="flex items-center justify-between border-b pb-3 border-white/10">
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center"><Icon name="calendar" className="w-4 h-4" /></span>
+                <div>
+                  <h2 className="text-base font-bold">Calendar Export (.ics)</h2>
+                  <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Sync due dates & 1-day alarms to iOS/Google</p>
+                </div>
+              </div>
+              <button onClick={onClose} className="p-2 text-slate-400 hover:text-white"><Icon name="x" className="w-5 h-5" /></button>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {['upcoming', 'thisMonth', 'all'].map((opt) => (
+                <button key={opt} onClick={() => setRange(opt)} className={`py-2 px-2 rounded-xl text-xs font-bold border capitalize ${range === opt ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-white/5 border-white/10 text-slate-300'}`}>
+                  {opt === 'thisMonth' ? 'This Month' : opt}
+                </button>
+              ))}
+            </div>
+            <div className="rounded-2xl border border-white/10 p-3 max-h-40 overflow-y-auto space-y-1.5 text-xs bg-white/[0.02]">
+              {exportList.map((b, i) => (
+                <div key={b.id || i} className="flex items-center justify-between py-1 border-b border-white/5 last:border-0">
+                  <span className="truncate max-w-[180px]">{b.name}</span>
+                  <span className="font-bold text-amber-400">${b.amount}</span>
+                </div>
+              ))}
+            </div>
+            <button disabled={exportList.length === 0} onClick={() => { downloadBulkICS(exportList); onClose(); }} className="w-full bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 font-extrabold py-3 rounded-xl text-sm flex items-center justify-center gap-2">
+              <Icon name="download" className="w-4 h-4" /> Download .ICS File
+            </button>
+          </div>
+        </div>
+      );
+    };
+
+    // --- MODAL: BACKUP & RESTORE ---
+    const BackupModal = ({ isOpen, onClose, bills, onImportSuccess, onResetDemo, isDark }) => {
+      const fileInputRef = useRef(null);
+      if (!isOpen) return null;
+      const handleExport = () => {
+        const blob = new Blob([JSON.stringify(bills, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `Bills_Backup_${new Date().toISOString().split('T')[0]}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+      };
+
+      const handleImport = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const parsed = JSON.parse(event.target.result);
+            if (Array.isArray(parsed)) {
+              onImportSuccess(parsed);
+              onClose();
+            }
+          } catch (_) {
+            alert('Invalid JSON backup file format');
+          }
+        };
+        reader.readAsText(file);
+      };
+
+      return (
+        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
+          <div className={`w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border p-5 sm:p-6 space-y-4 ${isDark ? 'bg-slate-900/90 border-white/15 text-slate-100' : 'bg-white/95 text-slate-900'}`}>
+            <div className="flex items-center justify-between border-b pb-3 border-white/10">
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-xl bg-cyan-500/15 text-cyan-400 flex items-center justify-center"><Icon name="download-cloud" className="w-4 h-4" /></span>
+                <h2 className="text-base font-bold">Data Backup & Restore</h2>
+              </div>
+              <button onClick={onClose} className="p-2 text-slate-400 hover:text-white"><Icon name="x" className="w-5 h-5" /></button>
+            </div>
+            <div className="space-y-3">
+              <button onClick={handleExport} className="w-full py-2.5 px-4 rounded-xl text-xs font-bold bg-white/5 border border-white/10 text-white flex items-center justify-center gap-2">
+                <Icon name="download" className="w-4 h-4 text-amber-400" /> Export JSON Backup ({bills.length} bills)
+              </button>
+              <input type="file" ref={fileInputRef} accept=".json" onChange={handleImport} className="hidden" />
+              <button onClick={() => fileInputRef.current?.click()} className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2">
+                <Icon name="upload" className="w-4 h-4" /> Restore JSON Backup
+              </button>
+              <div className="pt-2 text-center">
+                <button onClick={() => { if (confirm('Load sample starter bills?')) { onResetDemo(); onClose(); } }} className="text-amber-400 text-xs font-semibold">
+                  Load Starter Sample Bills
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // --- MAIN APP COMPONENT ---
+    function App() {
+      const [bills, setBills] = useState(() => loadBills());
+      const [currentFilter, setCurrentFilter] = useState('currentMonth');
+      const [searchQuery, setSearchQuery] = useState('');
+      const [currentSort, setCurrentSort] = useState('dueDateAsc');
+      const [activeView, setActiveView] = useState('bills');
+      const [isDark, setIsDark] = useState(true);
+
+      const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
+      const [editingBill, setEditingBill] = useState(null);
+      const [editingIndex, setEditingIndex] = useState(null);
+      const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
+      const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+
+      useEffect(() => {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(bills));
+      }, [bills]);
+
+      // KPIs
+      const summaryStats = useMemo(() => {
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+        let totalDueThisMonth = 0, totalPaidThisMonth = 0, totalOverdue = 0, totalNextMonth = 0;
+        let monthTotalBillsCount = 0, paidBillsCount = 0, overdueBillsCount = 0, upcomingCount = 0;
+
+        bills.forEach((bill) => {
+          if (!bill.dueDate) return;
+          const amt = parseFloat(bill.amount) || 0;
+          const [y, m] = bill.dueDate.split('-').map(Number);
+          const isThisMonth = y === currentYear && m === currentMonth + 1;
+          const diff = getDiffDays(bill.dueDate);
+
+          if (isThisMonth) {
+            monthTotalBillsCount++;
+            if (bill.paid) { totalPaidThisMonth += amt; paidBillsCount++; }
+            else { totalDueThisMonth += amt; upcomingCount++; }
+          }
+          if (!bill.paid) {
+            if (diff < 0) { totalOverdue += amt; overdueBillsCount++; }
+            if (m === currentMonth + 2 || (currentMonth === 11 && m === 1)) totalNextMonth += amt;
+          }
+        });
+        const monthlyBudgetTotal = totalDueThisMonth + totalPaidThisMonth;
+        const percentagePaid = monthlyBudgetTotal > 0 ? (totalPaidThisMonth / monthlyBudgetTotal) * 100 : 0;
+        return { totalDueThisMonth, totalPaidThisMonth, totalOverdue, totalNextMonth, monthTotalBillsCount, paidBillsCount, overdueBillsCount, upcomingCount, monthlyBudgetTotal, percentagePaid };
+      }, [bills]);
+
+      // Filter & Sort
+      const filteredAndSortedBills = useMemo(() => {
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+
+        let result = bills.filter((bill) => {
+          if (!bill.dueDate) return false;
+          const [y, m] = bill.dueDate.split('-').map(Number);
+          const billMonth = m - 1;
+          const diffDays = getDiffDays(bill.dueDate);
+
+          if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase().trim();
+            const matches = bill.name.toLowerCase().includes(q) || (bill.notes && bill.notes.toLowerCase().includes(q)) || (bill.category && bill.category.toLowerCase().includes(q));
+            if (!matches) return false;
+          }
+          switch (currentFilter) {
+            case 'currentMonth': return billMonth === currentMonth && y === currentYear;
+            case 'upcoming': return !bill.paid;
+            case 'nextMonth': return (billMonth === currentMonth + 1 && y === currentYear) || (currentMonth === 11 && billMonth === 0 && y === currentYear + 1);
+            case 'overdue': return !bill.paid && diffDays < 0;
+            case 'paid': return bill.paid;
+            default: return true;
+          }
+        });
+
+        return result.sort((a, b) => {
+          const amtA = parseFloat(a.amount) || 0;
+          const amtB = parseFloat(b.amount) || 0;
+          const dateA = new Date(a.dueDate).getTime();
+          const dateB = new Date(b.dueDate).getTime();
+          switch (currentSort) {
+            case 'dueDateAsc': return dateA - dateB;
+            case 'dueDateDesc': return dateB - dateA;
+            case 'amountDesc': return amtB - amtA;
+            case 'amountAsc': return amtA - amtB;
+            case 'nameAsc': return a.name.localeCompare(b.name);
+            default: return dateA - dateB;
+          }
+        });
+      }, [bills, currentFilter, searchQuery, currentSort]);
+
+      // Toggle Paid Handler
+      const handleTogglePaid = (targetBill) => {
+        const actualIndex = bills.findIndex((b) => (b.id && b.id === targetBill.id) || (b.name === targetBill.name && b.dueDate === targetBill.dueDate && b.amount === targetBill.amount));
+        if (actualIndex === -1) return;
+        const bill = { ...bills[actualIndex] };
+        const wasPaid = bill.paid;
+        bill.paid = !wasPaid;
+        let updatedBills = [...bills];
+
+        if (bill.paid && !wasPaid) {
+          try { window.confetti?.({ particleCount: 50, spread: 60, origin: { y: 0.85 }, colors: ['#f59e0b', '#10b981', '#3b82f6', '#ec4899'] }); } catch (_) {}
+          if (bill.isRecurring) {
+            const nextDueDate = getNextMonthDate(bill.dueDate);
+            const nextDisconnectDate = bill.disconnectDate ? getNextMonthDate(bill.disconnectDate) : undefined;
+            const createdRecurringBill = {
+              id: `bill-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+              name: bill.name,
+              amount: bill.amount,
+              dueDate: nextDueDate,
+              disconnectDate: nextDisconnectDate,
+              isRecurring: true,
+              paid: false,
+              category: bill.category,
+              notes: bill.notes,
+            };
+            bill.isRecurring = false;
+            updatedBills[actualIndex] = bill;
+            updatedBills.push(createdRecurringBill);
+          } else {
+            updatedBills[actualIndex] = bill;
+          }
+        } else {
+          updatedBills[actualIndex] = bill;
+        }
+        setBills(updatedBills);
+      };
+
+      const handleSaveBill = (billData, generateCalendar) => {
+        let updated = [...bills];
+        let saved;
+        if (editingIndex !== null && editingIndex >= 0 && editingIndex < bills.length) {
+          saved = { ...bills[editingIndex], ...billData };
+          updated[editingIndex] = saved;
+        } else {
+          saved = { id: `bill-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`, ...billData };
+          updated.push(saved);
+        }
+        setBills(updated);
+        setIsAddEditModalOpen(false);
+        if (generateCalendar) downloadBillICS(saved);
+      };
+
+      const handleDeleteBill = (targetBill) => {
+        if (!confirm(`Delete "${targetBill.name}"?`)) return;
+        setBills(bills.filter((b) => b !== targetBill && b.id !== targetBill.id));
+      };
+
+      return (
+        <div className={`min-h-screen pb-32 relative overflow-hidden transition-colors ${isDark ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
+          {/* Header */}
+          <header className={`sticky top-0 z-30 border-b backdrop-blur-xl ${isDark ? 'bg-slate-950/80 border-white/10' : 'bg-white/80 border-slate-200 shadow-sm'}`}>
+            <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-600 via-amber-500 to-amber-400 flex items-center justify-center font-black text-slate-950 text-lg border border-white/20 shadow-md">
+                  $
+                </div>
+                <div>
+                  <h1 className="text-base sm:text-lg font-extrabold tracking-tight">Bills Manager</h1>
+                  <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{summaryStats.monthTotalBillsCount} bills tracked</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <div className="p-0.5 rounded-xl border border-white/10 flex items-center bg-white/[0.04]">
+                  <button onClick={() => setActiveView('bills')} className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${activeView === 'bills' ? 'bg-white/10 text-amber-400' : 'text-slate-400'}`}>Bills</button>
+                  <button onClick={() => setActiveView('analytics')} className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${activeView === 'analytics' ? 'bg-white/10 text-amber-400' : 'text-slate-400'}`}>Insights</button>
+                </div>
+                <button onClick={() => setIsCalendarModalOpen(true)} className="p-2 rounded-xl border border-white/10 bg-white/5 text-slate-300"><Icon name="calendar" className="w-4 h-4" /></button>
+                <button onClick={() => setIsBackupModalOpen(true)} className="p-2 rounded-xl border border-white/10 bg-white/5 text-slate-300"><Icon name="download-cloud" className="w-4 h-4" /></button>
+                <button onClick={() => setIsDark(!isDark)} className="p-2 rounded-xl border border-white/10 bg-white/5 text-amber-400"><Icon name={isDark ? "sun" : "moon"} className="w-4 h-4" /></button>
+              </div>
+            </div>
+          </header>
+
+          <main className="max-w-4xl mx-auto px-4 pt-4 space-y-4">
+            {/* KPI Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
+              <div onClick={() => setCurrentFilter('currentMonth')} className="p-3.5 rounded-2xl border border-white/10 bg-white/[0.04] cursor-pointer">
+                <div className="text-[11px] font-semibold text-slate-400 uppercase">Due This Month</div>
+                <div className="text-xl sm:text-2xl font-black text-amber-400 mt-1">${summaryStats.totalDueThisMonth.toFixed(2)}</div>
+                <div className="text-[11px] text-slate-400 mt-1">{summaryStats.upcomingCount} pending</div>
+              </div>
+              <div onClick={() => setCurrentFilter('paid')} className="p-3.5 rounded-2xl border border-white/10 bg-white/[0.04] cursor-pointer">
+                <div className="text-[11px] font-semibold text-slate-400 uppercase">Paid So Far</div>
+                <div className="text-xl sm:text-2xl font-black text-emerald-400 mt-1">${summaryStats.totalPaidThisMonth.toFixed(2)}</div>
+                <div className="text-[11px] text-slate-400 mt-1">{summaryStats.paidBillsCount} completed</div>
+              </div>
+              <div onClick={() => setCurrentFilter('overdue')} className={`p-3.5 rounded-2xl border cursor-pointer ${summaryStats.totalOverdue > 0 ? 'bg-red-950/30 border-red-500/40 card-overdue-glow' : 'border-white/10 bg-white/[0.04]'}`}>
+                <div className={`text-[11px] font-semibold uppercase ${summaryStats.totalOverdue > 0 ? 'text-red-400' : 'text-slate-400'}`}>Overdue</div>
+                <div className={`text-xl sm:text-2xl font-black mt-1 ${summaryStats.totalOverdue > 0 ? 'text-red-400' : 'text-slate-200'}`}>${summaryStats.totalOverdue.toFixed(2)}</div>
+                <div className="text-[11px] text-slate-400 mt-1">{summaryStats.overdueBillsCount > 0 ? `${summaryStats.overdueBillsCount} action needed` : 'All clear'}</div>
+              </div>
+              <div onClick={() => setCurrentFilter('upcoming')} className="p-3.5 rounded-2xl border border-white/10 bg-white/[0.04] cursor-pointer">
+                <div className="text-[11px] font-semibold text-slate-400 uppercase">Next Month</div>
+                <div className="text-xl sm:text-2xl font-black text-cyan-400 mt-1">${summaryStats.totalNextMonth.toFixed(2)}</div>
+                <div className="text-[11px] text-slate-400 mt-1">Upcoming pipeline</div>
+              </div>
+            </div>
+
+            {/* Views */}
+            {activeView === 'analytics' ? (
+              <div className="space-y-4">
+                <div className="p-4 sm:p-5 rounded-2xl border border-white/10 bg-white/[0.04]">
+                  <h2 className="text-base font-bold flex items-center gap-2 mb-4"><Icon name="pie-chart" className="w-4 h-4 text-amber-400" /> Category Breakdown</h2>
+                  <div className="space-y-3">
+                    {Object.values(CATEGORIES).map((cat) => {
+                      const catBills = bills.filter((b) => (b.category || inferCategoryFromName(b.name)) === cat.id);
+                      const total = catBills.reduce((acc, b) => acc + (parseFloat(b.amount) || 0), 0);
+                      if (total === 0) return null;
+                      return (
+                        <div key={cat.id} className="p-3 rounded-xl border border-white/5 bg-white/[0.02] flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <span className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${cat.color}25`, color: cat.color }}><Icon name={cat.icon} className="w-4 h-4" /></span>
+                            <div>
+                              <div className="text-xs font-semibold">{cat.label}</div>
+                              <div className="text-[10px] text-slate-400">{catBills.length} bill(s)</div>
+                            </div>
+                          </div>
+                          <div className="text-sm font-bold">${total.toFixed(2)}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Filters */}
+                <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                  {[
+                    { id: 'currentMonth', label: 'This Month', count: summaryStats.upcomingCount },
+                    { id: 'upcoming', label: 'Upcoming' },
+                    { id: 'nextMonth', label: 'Next Month' },
+                    { id: 'overdue', label: 'Overdue', count: summaryStats.overdueBillsCount },
+                    { id: 'paid', label: 'Paid', count: summaryStats.paidBillsCount },
+                    { id: 'all', label: 'All Bills', count: bills.length },
+                  ].map((tab) => (
+                    <button key={tab.id} onClick={() => setCurrentFilter(tab.id)} className={`shrink-0 py-2 px-3 text-xs font-semibold rounded-xl border transition-all ${currentFilter === tab.id ? 'bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 font-bold border-amber-300/40' : 'bg-white/[0.04] border-white/10 text-slate-300'}`}>
+                      {tab.label} {typeof tab.count === 'number' && `(${tab.count})`}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Search & Sort */}
+                <div className="flex gap-2">
+                  <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search bills..." className="flex-1 text-xs rounded-xl px-3 py-2.5 bg-white/[0.04] border border-white/10 text-white outline-none focus:border-amber-400" />
+                  <select value={currentSort} onChange={(e) => setCurrentSort(e.target.value)} className="text-xs rounded-xl px-2.5 py-2.5 bg-slate-900 border border-white/10 text-slate-300 outline-none">
+                    <option value="dueDateAsc">Due Date (Earliest)</option>
+                    <option value="dueDateDesc">Due Date (Latest)</option>
+                    <option value="amountDesc">Amount (Highest)</option>
+                    <option value="amountAsc">Amount (Lowest)</option>
+                    <option value="nameAsc">Name (A-Z)</option>
+                  </select>
+                </div>
+
+                {/* Cards List */}
+                <div className="space-y-3">
+                  {filteredAndSortedBills.length === 0 ? (
+                    <div className="text-center py-12 border border-white/10 rounded-2xl bg-white/[0.02]">
+                      <p className="text-xs text-slate-400">No bills found for this filter.</p>
+                    </div>
+                  ) : (
+                    filteredAndSortedBills.map((bill, index) => {
+                      const status = getStatusInfo(bill);
+                      const cat = CATEGORIES[bill.category || inferCategoryFromName(bill.name)] || CATEGORIES.other;
+                      return (
+                        <article key={bill.id || index} className={`rounded-2xl p-4 border backdrop-blur-xl flex flex-col justify-between gap-3 ${status.cardBorderClass} ${bill.paid ? 'bg-white/[0.02] border-white/5 opacity-60' : 'bg-white/[0.04] border-white/10'}`}>
+                          <div className="flex items-start justify-between gap-2.5">
+                            <div className="space-y-1.5 min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-xs font-semibold ${cat.bgDark} ${cat.textDark}`}>
+                                  <Icon name={cat.icon} className="w-3.5 h-3.5" />
+                                  <span>{cat.label}</span>
+                                </span>
+                                <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${status.badgeClass}`}>{status.badgeLabel}</span>
+                                {bill.isRecurring && (
+                                  <span className="px-2 py-0.5 rounded-md text-[10px] bg-purple-500/15 text-purple-300 border border-purple-500/25 flex items-center gap-1">
+                                    <Icon name="repeat" className="w-3 h-3" /> Monthly
+                                  </span>
+                                )}
+                              </div>
+                              <h3 className={`text-base font-bold truncate ${bill.paid ? 'line-through text-slate-500' : 'text-white'}`}>{bill.name}</h3>
+                              <div className="text-xs text-slate-300 flex items-center gap-2">
+                                <span>Due: <strong>{formatDisplayDate(bill.dueDate, true)}</strong></span>
+                                {bill.disconnectDate && <span className="text-red-400 font-semibold text-[11px]">Shutoff: {formatDisplayDate(bill.disconnectDate, true)}</span>}
+                              </div>
+                              {bill.notes && <p className="text-[11px] italic text-slate-400">Note: {bill.notes}</p>}
+                            </div>
+                            <div className="text-right">
+                              <div className="text-xl font-extrabold text-white">${parseFloat(bill.amount).toFixed(2)}</div>
+                              <span className="text-[10px] uppercase text-slate-500 font-medium">{bill.paid ? 'Settled' : 'Due'}</span>
+                            </div>
+                          </div>
+                          <div className="pt-2.5 border-t border-white/10 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => handleTogglePaid(bill)} className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 ${bill.paid ? 'bg-white/5 text-slate-300' : 'bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 shadow-md'}`}>
+                                <Icon name={bill.paid ? "rotate-ccw" : "check"} className="w-3.5 h-3.5" />
+                                <span>{bill.paid ? 'Mark Unpaid' : 'Mark Paid'}</span>
+                              </button>
+                              <button onClick={() => downloadBillICS(bill)} className="px-2.5 py-1.5 rounded-xl text-xs border border-white/10 bg-white/5 text-slate-300 flex items-center gap-1">
+                                <Icon name="calendar-plus" className="w-3.5 h-3.5 text-amber-400" />
+                                <span>Cal</span>
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => { setEditingBill(bill); setEditingIndex(bills.indexOf(bill)); setIsAddEditModalOpen(true); }} className="p-1.5 text-slate-400 hover:text-white"><Icon name="edit-3" className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => handleDeleteBill(bill)} className="p-1.5 text-red-400 hover:bg-red-500/20 rounded-lg"><Icon name="trash-2" className="w-3.5 h-3.5" /></button>
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </main>
+
+          {/* Sticky Bottom Add Button */}
+          <div className="fixed bottom-0 left-0 right-0 p-3.5 border-t border-white/10 bg-slate-950/80 backdrop-blur-2xl z-40">
+            <div className="max-w-4xl mx-auto">
+              <button onClick={() => { setEditingBill(null); setEditingIndex(null); setIsAddEditModalOpen(true); }} className="w-full bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 text-slate-950 font-extrabold py-3.5 rounded-2xl shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2 text-sm">
+                <Icon name="plus" className="w-5 h-5 stroke-[2.5]" />
+                <span>Add New Bill</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Modals */}
+          <BillModal isOpen={isAddEditModalOpen} onClose={() => setIsAddEditModalOpen(false)} onSave={handleSaveBill} initialBill={editingBill} isDark={isDark} />
+          <CalendarExportModal isOpen={isCalendarModalOpen} onClose={() => setIsCalendarModalOpen(false)} bills={bills} isDark={isDark} />
+          <BackupModal isOpen={isBackupModalOpen} onClose={() => setIsBackupModalOpen(false)} bills={bills} onImportSuccess={setBills} onResetDemo={() => setBills(getSampleBills())} isDark={isDark} />
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
