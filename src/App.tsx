@@ -181,11 +181,13 @@ export default function App() {
       // Tab filter
       switch (currentFilter) {
         case 'currentMonth':
-          return (billMonth === currentMonth && billYear === currentYear) || (!bill.paid && diffDays < 0);
+          return billMonth === currentMonth && billYear === currentYear;
         case 'upcoming':
           return !bill.paid;
         case 'nextMonth':
           return billMonth === targetNextMonth && billYear === targetNextYear;
+        case 'overdue':
+          return !bill.paid && diffDays < 0;
         case 'paid':
           return bill.paid;
         case 'all':
@@ -443,7 +445,7 @@ export default function App() {
               currentSort={currentSort}
               onSortChange={setCurrentSort}
               overdueCount={summaryStats.overdueBillsCount}
-              unpaidMonthCount={summaryStats.upcomingCount + summaryStats.overdueBillsCount}
+              unpaidMonthCount={summaryStats.upcomingCount}
               paidCount={summaryStats.paidBillsCount}
               totalCount={bills.length}
               isDark={isDark}

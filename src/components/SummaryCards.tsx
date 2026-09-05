@@ -86,7 +86,7 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({ stats, isDark, onFil
         {/* Card 3: Overdue (Highlighted if > 0) */}
         <div
           id="stat-card-overdue"
-          onClick={() => onFilterClick?.('upcoming')}
+          onClick={() => onFilterClick?.('overdue')}
           className={`cursor-pointer transition-all duration-200 p-3.5 rounded-2xl border backdrop-blur-xl relative overflow-hidden group ${
             stats.totalOverdue > 0
               ? isDark
@@ -129,7 +129,7 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({ stats, isDark, onFil
         {/* Card 4: Next Month Pipeline */}
         <div
           id="stat-card-next-month"
-          onClick={() => onFilterClick?.('nextMonth')}
+          onClick={() => onFilterClick?.('upcoming')}
           className={`cursor-pointer transition-all duration-200 p-3.5 rounded-2xl border backdrop-blur-xl relative overflow-hidden group ${
             isDark
               ? 'bg-white/[0.04] border-white/10 hover:border-cyan-500/50 hover:bg-white/[0.07] shadow-lg shadow-black/20'

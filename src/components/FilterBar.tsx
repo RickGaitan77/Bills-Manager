@@ -40,8 +40,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 }) => {
   const tabs: Array<{ id: FilterType; label: string; count?: number; highlightBadge?: boolean }> = [
     { id: 'currentMonth', label: 'This Month', count: unpaidMonthCount },
-    { id: 'upcoming', label: 'Unpaid' },
+    { id: 'upcoming', label: 'Upcoming' },
     { id: 'nextMonth', label: 'Next Month' },
+    { id: 'overdue', label: 'Overdue', count: overdueCount, highlightBadge: overdueCount > 0 },
     { id: 'paid', label: 'Paid', count: paidCount },
     { id: 'all', label: 'All Bills', count: totalCount },
   ];
