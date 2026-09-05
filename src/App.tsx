@@ -180,8 +180,11 @@ export default function App() {
 
       // Tab filter
       switch (currentFilter) {
-        case 'currentMonth':
-          return billMonth === currentMonth && billYear === currentYear;
+        case 'currentMonth': {
+          const isCurrentMonth = billMonth === currentMonth && billYear === currentYear;
+          const isUnpaidPrevious = !bill.paid && (billYear < currentYear || (billYear === currentYear && billMonth < currentMonth));
+          return isCurrentMonth || isUnpaidPrevious;
+        }
         case 'upcoming':
           return !bill.paid;
         case 'nextMonth':
