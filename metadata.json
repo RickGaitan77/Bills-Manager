@@ -1,6 +1,0 @@
-{
-  "name": "Bills Manager",
-  "description": "Mobile-first bill tracking and analytics dashboard with calendar synchronization and recurring payment management.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
